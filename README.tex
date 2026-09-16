@@ -1,0 +1,102 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{booktabs,longtable,array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\title{OpsDesk\\Real-Time Service Request Management System}
+\author{}
+\date{}
+\begin{document}
+\maketitle
+
+\section{Overview}
+OpsDesk is a full-stack service request management system. Operators submit long-running tasks without waiting for completion. Supervisors monitor status, progress, queue activity, and audit logs in real time through WebSockets and background Worker Threads.
+
+\section{Features}
+Non-blocking ingestion; bounded multi-threaded processing; Socket.IO live updates; Operator and Supervisor workspaces; cooperative cancellation; MongoDB progress audit trails; late-join hydration; search, filters, pagination; and table/grid Supervisor views.
+
+\section{Technology Stack}
+\begin{longtable}{p{0.25\textwidth}p{0.65\textwidth}}
+\toprule
+Frontend & React 19, TypeScript, Vite, Tailwind CSS, TanStack React Query, Zustand, Lucide, Socket.IO Client\\
+Backend & Node.js, Express, TypeScript, Socket.IO, Zod, CORS, express-rate-limit\\
+Concurrency & Node.js \texttt{worker\_threads}\\
+Database & MongoDB with Mongoose\\
+Testing & Vitest, Supertest, MongoMemoryServer\\
+\bottomrule
+\end{longtable}
+
+\section{Prerequisites}
+Install Node.js 18 or later, npm 9 or later, and MongoDB Community Server or use MongoDB Atlas. The default database URI is \texttt{mongodb://localhost:27017/service-requests}.
+
+\section{Setup and Environment}
+Create \texttt{server/.env}:
+\begin{verbatim}
+NODE_ENV=development
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/service-requests
+CORS_ORIGIN=http://localhost:5173
+MAX_WORKERS=5
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_MAX_REQUESTS=20
+\end{verbatim}
+Install dependencies:
+\begin{verbatim}
+cd server
+npm install
+cd ../client
+npm install
+\end{verbatim}
+
+\section{Build and Run}
+Start MongoDB, then use two terminals:
+\begin{verbatim}
+# Terminal 1
+cd server
+npm run dev
+
+# Terminal 2
+cd client
+npm run dev
+\end{verbatim}
+Open \url{http://localhost:5173}. The backend runs at \url{http://localhost:5000}. If port 5000 is already in use, keep the healthy existing backend or change \texttt{PORT} and the Vite proxy together.
+
+Production commands:
+\begin{verbatim}
+cd server && npm run build && npm start
+cd client && npm run build && npm run preview
+\end{verbatim}
+
+\section{Database Setup}
+The server connects to MongoDB during startup. It stores service requests in the \texttt{ServiceRequest} collection and checkpoint records in the \texttt{ProgressLog} collection. Indexes support status, priority, submitter, timestamps, and text search. Tests use an isolated in-memory MongoDB instance.
+
+\section{API Documentation}
+\begin{longtable}{p{0.12\textwidth}p{0.35\textwidth}p{0.38\textwidth}}
+\toprule Method & Endpoint & Description\\\midrule
+POST & \texttt{/api/requests} & Create and enqueue a service request\\
+GET & \texttt{/api/requests} & List, search, filter, sort, and paginate requests\\
+GET & \texttt{/api/requests/:id} & Retrieve request details\\
+POST & \texttt{/api/requests/:id/cancel} & Cancel pending or processing request\\
+GET & \texttt{/api/requests/:id/progress} & Retrieve progress audit logs\\
+GET & \texttt{/health} & Return server health\\
+\bottomrule
+\end{longtable}
+Creation requires \texttt{title}, \texttt{description}, \texttt{priority}, and \texttt{submittedBy}. Valid priorities are \texttt{low}, \texttt{medium}, \texttt{high}, and \texttt{critical}. List queries support \texttt{page}, \texttt{limit}, \texttt{status}, \texttt{priority}, \texttt{submittedBy}, \texttt{search}, \texttt{sortBy}, and \texttt{sortOrder}.
+
+\section{WebSocket Events}
+Socket.IO broadcasts \texttt{request:created}, \texttt{request:status-updated}, \texttt{request:progress-updated}, \texttt{request:completed}, \texttt{request:failed}, and \texttt{request:cancelled}. A newly connected client receives \texttt{requests:initial-state} containing pending and processing requests.
+
+\section{Testing}
+Run the backend API tests with:
+\begin{verbatim}
+cd server
+npm test
+\end{verbatim}
+The tests cover validation, persistence, listing, filtering, pagination, cancellation, progress-log retrieval, and errors. Worker Threads and Socket.IO are mocked in the API suite; live worker and WebSocket behavior should also be demonstrated manually in two browser views.
+
+\section{Assumptions and Limitations}
+Roles are simulated with a client-side Operator/Supervisor toggle; authentication and backend RBAC are not implemented. The WorkerPool queue is in memory and the deployment is single-node. Authentication, distributed queuing, and external notification webhooks are future improvements.
+\end{document}

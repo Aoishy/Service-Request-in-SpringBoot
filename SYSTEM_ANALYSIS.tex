@@ -1,0 +1,84 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{enumitem}
+\usepackage{booktabs,longtable,array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\setlist[itemize]{noitemsep,topsep=2pt}
+\setlist[enumerate]{noitemsep,topsep=2pt}
+\title{System Analysis\\Real-Time Service Request Management System}
+\author{}
+\date{}
+\begin{document}
+\maketitle
+
+\section{Problem Statement}
+A growing customer service organization currently manages incoming service requests through manual procedures such as email, physical logs, or spreadsheets. This creates poor visibility into bottlenecks, delayed status communication, uncontrolled sequential processing, and interface blocking during long-running operations. A centralized web system is required so Operators can submit requests immediately while Supervisors monitor simultaneous execution, progress, and audit trails in real time.
+
+\section{Business Objectives}
+\begin{enumerate}
+\item Provide immediate API acknowledgement while heavy processing runs asynchronously.
+\item Give Supervisors real-time visibility into status, progress, stages, and queue activity.
+\item Process multiple intensive requests concurrently with a bounded worker pool.
+\item Provide cancellation, audit logging, failure isolation, and late-join state hydration.
+\end{enumerate}
+
+\section{Users and Actors}
+\begin{longtable}{p{0.22\textwidth}p{0.68\textwidth}}
+\toprule
+\textbf{Role} & \textbf{Responsibilities}\\\midrule
+Operator & Submit requests with title, description, priority, and submitter name; view personal submissions and progress logs.\\
+Supervisor & Monitor active, queued, completed, and failed requests; search, filter, paginate, switch table/grid views, inspect logs, and cancel requests.\\
+\bottomrule
+\end{longtable}
+Formal authentication is outside the current scope; roles are simulated by a client-side workspace toggle.
+
+\section{Assumptions}
+\begin{enumerate}
+\item Requests are asynchronous operational tasks with four priority levels: low, medium, high, and critical.
+\item Processing uses six phases: Validation, Resource Allocation, Analysis, Processing, Quality Check, and Finalization.
+\item Pending and processing requests may be cancelled; completed, failed, and cancelled requests may not.
+\item CPU-heavy work is isolated in Node.js Worker Threads; database writes remain on the main thread.
+\item The initial deployment is single-node with an in-memory FIFO queue.
+\end{enumerate}
+
+\section{Scope}
+\subsection*{In Scope}
+REST endpoints, MongoDB persistence, validation, error handling, bounded Worker Threads, FIFO queuing, Socket.IO updates, audit logs, responsive role-specific SPA views, search, filtering, pagination, and API integration tests.
+\subsection*{Out of Scope}
+JWT/OAuth authentication, backend RBAC, distributed brokers such as Redis or Kafka, multi-node clustering, and external email/SMS notifications.
+
+\section{Functional Requirements}
+\begin{longtable}{p{0.12\textwidth}p{0.48\textwidth}p{0.25\textwidth}}
+\toprule
+\textbf{ID} & \textbf{Requirement} & \textbf{Status}\\\midrule
+FR-01 & Create requests with title, description, priority, and submitter. & Implemented\\
+FR-02 & Return immediately while processing continues in the background. & Implemented\\
+FR-03 & List, sort, and paginate requests. & Implemented\\
+FR-04 & Search and filter by status, priority, submitter, title, and description. & Implemented\\
+FR-05 & Inspect metadata, status, timestamps, errors, and logs. & Implemented\\
+FR-06 & Push status transitions using WebSockets. & Implemented\\
+FR-07 & Push live percentage and stage progress. & Implemented\\
+FR-08 & Cancel pending or processing requests. & Implemented\\
+FR-09 & Persist append-only progress checkpoints. & Implemented\\
+FR-10 & Hydrate newly connected clients with active requests. & Implemented\\
+FR-11 & Validate request body, query, and path parameters. & Implemented\\
+FR-12 & Isolate worker failures and mark affected requests failed. & Implemented\\
+\bottomrule
+\end{longtable}
+
+\section{Non-Functional Requirements}
+\begin{description}
+\item[Performance] Creation is acknowledged without waiting for CPU-heavy processing.
+\item[Scalability] MAX\_WORKERS bounds concurrent threads and surplus jobs wait in FIFO order.
+\item[Reliability] Worker errors are isolated and recorded as failed request states.
+\item[Security] CORS, rate limiting, input validation, and production error obfuscation are implemented; authentication is a future enhancement.
+\item[Maintainability] TypeScript, layered architecture, typed configuration, and focused modules keep responsibilities separated.
+\item[Availability] The API event loop remains responsive while workers execute; the current single-node queue is a documented limitation.
+\item[Usability] Responsive Operator and Supervisor views provide clear badges, progress bars, filters, and table/grid presentation.
+\item[Responsiveness] Socket.IO updates the UI without polling or manual page refreshes.
+\end{description}
+\end{document}
