@@ -1,31 +1,30 @@
 # OpsDesk — Real-Time Service Request Management System
 
-A high-performance, full-stack service request management system designed for service organizations. It enables **Operators** to submit complex customer service tasks without interface lag, while **Supervisors** monitor multi-stage execution, throughput, and progress logs in real time via WebSockets and multi-threaded background workers.
+OpsDesk is a full-stack service request management platform built around a Spring Boot backend, PostgreSQL persistence, and a React frontend for role-based operational monitoring. Operators submit service requests without waiting for completion, while supervisors track progress, monitor active workloads, and receive live updates through STOMP-based WebSocket broadcasts.
 
 ---
 
 ## Features
 
-- **Non-Blocking Ingestion**: Immediate API responses for long-running service requests.
-- **Multi-Threaded Concurrency**: Bounded `WorkerPool` powered by Node.js `worker_threads` to process CPU-bound operations in parallel without starving the event loop.
-- **Real-Time Live Updates**: Instant state, progress (0–100%), and stage updates broadcasted via **Socket.IO**.
-- **Role-Based Workspaces**:
-  - **Operator Portal**: Fast service intake form, realistic business templates, and submission tracking.
-  - **Supervisor Console**: Live operational metrics (Active, Queued, Completed, Failed), search and filters, table/grid view toggling, and request cancellation.
-- **Cooperative Cancellation**: Cancel pending queue jobs or actively running worker thread tasks on-demand.
-- **Progress Audit Trail**: Append-only checkpoint logging persisting every stage transition with timestamps in MongoDB.
-- **Late-Join Hydration**: Newly connected supervisor dashboards receive active request state on initial connection.
-- **Automated Testing Suite**: Full integration test coverage using Vitest, Supertest, and MongoMemoryServer.
+- Non-blocking request intake with asynchronous background execution.
+- Spring Boot backend built with Java 21 and JPA for PostgreSQL persistence.
+- Fixed-thread worker pool for processing request lifecycle stages in parallel.
+- Live status and progress updates over STOMP WebSocket topics.
+- Operator and supervisor role views in the React client.
+- Request cancellation for pending or processing work items.
+- Progress audit logs persisted per request for traceability.
+- Automatic lifecycle updates from pending to processing to completed, failed, or cancelled.
 
 ---
 
 ## Technology Stack
 
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, TanStack React Query v5, Zustand, Lucide React, Socket.IO Client.
-- **Backend**: Node.js, Express 4, TypeScript, Socket.IO v4, Zod, express-rate-limit, cors.
-- **Concurrency**: Node.js `worker_threads`.
-- **Database**: MongoDB with Mongoose 8.
-- **Testing**: Vitest, Supertest, MongoMemoryServer.
+- Frontend: React, TypeScript, Vite, Tailwind CSS
+- Backend: Spring Boot 4.1.1, Java 21, Spring Web MVC, Spring Security, Spring WebSocket, Spring Data JPA
+- Database: PostgreSQL
+- Real-time communication: STOMP over WebSockets
+- Concurrency: Java ExecutorService-based worker pool
+- Validation: Jakarta Validation / Bean Validation
 
 ---
 
@@ -33,269 +32,221 @@ A high-performance, full-stack service request management system designed for se
 
 ```mermaid
 flowchart LR
-    subgraph Frontend ["Client Tier (React 19 + Vite)"]
+    subgraph Frontend["Client Tier (React + Vite)"]
         Operator["Operator Portal"]
         Supervisor["Supervisor Console"]
     end
 
-    subgraph Backend ["Application Tier (Node.js + Express)"]
-        REST["REST API\n(/api/requests)"]
-        SocketServer["Socket.IO Server\n(Live Event Broadcaster)"]
-        WorkerPool["WorkerPool Manager\n(FIFO Queue + Limit)"]
+    subgraph Backend["Application Tier (Spring Boot)"]
+        Controller["REST Controller\n/api/requests"]
+        Service["Service Layer\nBusiness Logic"]
+        WebSocket["STOMP Broker\n/topic updates"]
+        WorkerPool["WorkerPool\nExecutorService"]
     end
 
-    subgraph Workers ["Concurrency Tier"]
-        W1["Worker Thread 1"]
-        W2["Worker Thread 2"]
+    subgraph Processing["Background Processing"]
+        RequestProcessor["RequestProcessor"]
     end
 
-    subgraph Database ["Persistence Tier"]
-        MongoDB[("MongoDB Database\n(Requests & Logs)")]
+    subgraph Database["Persistence Tier"]
+        Postgres[("PostgreSQL")]
     end
 
-    Operator -->|HTTP REST| REST
-    Supervisor -->|HTTP REST| REST
-    Operator <-->|WebSockets| SocketServer
-    Supervisor <-->|WebSockets| SocketServer
+    Operator -->|REST| Controller
+    Supervisor -->|REST| Controller
+    Operator <-->|STOMP WS| WebSocket
+    Supervisor <-->|STOMP WS| WebSocket
 
-    REST --> WorkerPool
-    REST --> MongoDB
-    WorkerPool --> W1
-    WorkerPool --> W2
-    W1 -.->|IPC| WorkerPool
-    W2 -.->|IPC| WorkerPool
-    WorkerPool --> MongoDB
-    WorkerPool --> SocketServer
+    Controller --> Service
+    Service --> WorkerPool
+    Service --> Postgres
+    WorkerPool --> RequestProcessor
+    RequestProcessor --> Postgres
+    RequestProcessor --> WebSocket
 ```
 
 ---
 
 ## Project Structure
 
-```
+```text
 AoishyTask/
-├── SYSTEM_ANALYSIS.md          # Business problem, requirements, scope, NFRs
-├── SYSTEM_DESIGN.md            # Architecture, schemas, API, WebSockets, Concurrency
-├── IMPLEMENTATION.md           # Implementation breakdown, lifecycle, testing
-├── README.md                   # Project overview & running instructions
-│
-├── server/                     # Backend Node.js / Express Application
+├── README.md
+├── SYSTEM_ANALYSIS.md
+├── SYSTEM_DESIGN.md
+├── IMPLEMENTATION.md
+├── client/                         # React frontend
+│   ├── package.json
 │   ├── src/
-│   │   ├── index.ts            # Server entrypoint
-│   │   ├── app.ts              # Express application setup
-│   │   ├── config/             # Typed config loader
-│   │   ├── db/                 # MongoDB connection manager
-│   │   ├── models/             # Mongoose schemas (ServiceRequest, ProgressLog)
-│   │   ├── repositories/       # Data-access layer
-│   │   ├── services/           # Business logic & worker dispatching
-│   │   ├── controllers/        # Express HTTP controllers
-│   │   ├── routes/             # API routes
-│   │   ├── validation/         # Zod validation schemas
-│   │   ├── middleware/         # Validation, rate limiting, error handling
-│   │   ├── socket/             # Socket.IO handlers and hydration
-│   │   ├── workers/            # WorkerPool & requestProcessor.worker
-│   │   └── __tests__/          # Vitest integration tests
-│   └── package.json
-│
-└── client/                     # Frontend React Application
-    ├── src/
-    │   ├── App.tsx             # Root component & providers
-    │   ├── api/                # React Query hooks & Axios instance
-    │   ├── components/         # Reusable UI components
-    │   ├── hooks/              # useSocket WebSocket client hook
-    │   ├── pages/              # OperatorPage & SupervisorPage
-    │   └── store/              # Zustand role store
-    └── package.json
+│   └── README.md
+├── service-request-server/         # Spring Boot backend
+│   ├── pom.xml
+│   ├── mvnw
+│   ├── src/
+│   └── application.properties
+└── task
 ```
 
 ---
 
 ## Prerequisites
 
-Before running the application, make sure you have the following installed:
-
-- **Node.js**: `v18.0.0` or higher (LTS recommended)
-- **npm**: `v9.0.0` or higher
-- **MongoDB**: Local MongoDB community server running on port `27017` (or a MongoDB Atlas connection string).
-
----
-
-## Environment Variables
-
-### Backend Configuration (`server/.env`)
-
-Create a `.env` file in the `server/` directory:
-
-```env
-# Server Configuration
-NODE_ENV=development
-PORT=5000
-
-# Database Configuration
-MONGODB_URI=mongodb://localhost:27017/service-requests
-
-# CORS Configuration
-CORS_ORIGIN=http://localhost:5173
-
-# Concurrency Worker Configuration
-MAX_WORKERS=5
-
-# Rate Limiting Configuration
-RATE_LIMIT_WINDOW_MS=60000
-RATE_LIMIT_MAX_REQUESTS=20
-```
-
-### Frontend Configuration (`client/.env`)
-
-```env
-# Optional: defaults to proxy on port 5173
-VITE_API_BASE_URL=/api
-```
+- Java 21
+- Maven 3.9+
+- PostgreSQL 14 or newer
+- Node.js 18+ and npm
 
 ---
 
-## Installation
+## Environment Setup
 
-Clone the repository and install dependencies for both server and client:
+### 1. Create the PostgreSQL database
 
-```bash
-# 1. Install Backend Dependencies
-cd server
-npm install
+```sql
+CREATE DATABASE service_request_db;
+```
 
-# 2. Install Frontend Dependencies
-cd ../client
-npm install
+### 2. Configure the backend datasource
+
+The Spring configuration is in `service-request-server/src/main/resources/application.properties`:
+
+```properties
+spring.application.name=service-request-server
+
+spring.datasource.url=jdbc:postgresql://localhost:5432/service_request_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres123
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+server.port=8080
 ```
 
 ---
 
 ## Running the Application
 
-### 1. Start MongoDB
-Ensure MongoDB is running locally:
+### Backend
+
 ```bash
-# Example for MongoDB service
-mongod --dbpath /path/to/data/db
+cd service-request-server
+./mvnw spring-boot:run
 ```
 
-### 2. Start the Backend Server
-```bash
-cd server
-npm run dev
-```
-*The server will start at `http://localhost:5000` with WebSocket support enabled.*
+The backend runs on:
 
-### 3. Start the Frontend Client
-In a new terminal window:
+- http://localhost:8080
+- WebSocket endpoint: ws://localhost:8080/ws
+
+### Frontend
+
 ```bash
 cd client
+npm install
 npm run dev
 ```
-*The client will start at `http://localhost:5173`.*
+
+The frontend runs on:
+
+- http://localhost:5173
 
 ---
 
-## API Documentation
+## API Overview
 
-Base URL: `http://localhost:5000/api/requests`
+Base path: `/api/requests`
 
-| Method | Endpoint | Description | Query / Body Parameters |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/requests` | Create and enqueue a service request | Body: `{ title, description, priority, submittedBy }` |
-| `GET` | `/api/requests` | List requests with pagination and filters | Query: `page, limit, status, priority, submittedBy, search, sortBy, sortOrder` |
-| `GET` | `/api/requests/:id` | Get single request details | Path: `:id` (24-char ObjectId) |
-| `POST` | `/api/requests/:id/cancel` | Cancel a pending or processing request | Path: `:id` (24-char ObjectId) |
-| `GET` | `/api/requests/:id/progress`| Get full progress audit log entries | Path: `:id` (24-char ObjectId) |
-| `GET` | `/health` | Server health check endpoint | None |
-
----
-
-## WebSocket Events
-
-| Event Name | Direction | Description |
-| :--- | :--- | :--- |
-| `requests:initial-state` | Server → Client | Emits initial active request snapshot to newly connected client. |
-| `request:created` | Server → All | Broadcasts newly submitted service request. |
-| `request:status-updated` | Server → All | Broadcasts status change (e.g. from `pending` to `processing`). |
-| `request:progress-updated`| Server → All | Broadcasts live stage progress percentage and stage message. |
-| `request:completed` | Server → All | Broadcasts request completion (100%). |
-| `request:failed` | Server → All | Broadcasts processing error details and termination. |
-| `request:cancelled` | Server → All | Broadcasts cancellation state. |
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/api/requests` | Create a new service request |
+| GET | `/api/requests` | List requests with filter and pagination support |
+| GET | `/api/requests/{id}` | Fetch a single request by ID |
+| PATCH | `/api/requests/{id}/cancel` | Cancel a pending or processing request |
+| GET | `/api/requests/{id}/progress` | Retrieve progress log entries |
+| DELETE | `/api/requests/{id}` | Delete a request |
 
 ---
 
-## Concurrency & Background Processing
+## WebSocket Topics
 
-- **Thread Pool Architecture**: The `WorkerPool` regulates active worker threads (`MAX_WORKERS=5`).
-- **Isolation**: Work is processed inside Node.js `Worker Threads` (`worker_threads`), executing prime-sieve computations in chunked cycles.
-- **Responsiveness**: The Express main thread never executes long-running CPU loops, ensuring sub-50ms API responsiveness.
-- **Cancellation**: Supports non-destructive cancellation of queued jobs or running worker tasks via inter-process message passing.
+The backend currently publishes STOMP messages through the `/topic` broker.
+
+| Topic | Direction | Description |
+| --- | --- | --- |
+| `/topic/request-created` | Server → Client | New request created |
+| `/topic/request-status-updated` | Server → Client | Lifecycle changes such as processing start |
+| `/topic/request-progress-updated` | Server → Client | Progress stage and percentage updates |
+| `/topic/request-completed` | Server → Client | Request completion |
+| `/topic/request-failed` | Server → Client | Request failure |
+| `/topic/request-cancelled` | Server → Client | Request cancellation |
+
+---
+
+## Concurrency Model
+
+The backend uses a Java `ExecutorService`-backed worker pool with bounded concurrency. Each request is submitted to the pool after successful database insert and commit, then processed asynchronously by the request processor. The processor advances through lifecycle stages, writes progress logs, updates request state, and emits WebSocket notifications.
 
 ---
 
 ## Testing
 
-The backend includes automated API integration tests running against an in-memory MongoDB database:
+Run the backend test suite with:
 
 ```bash
-cd server
-npm test
+cd service-request-server
+./mvnw test
 ```
 
-To run tests in watch mode:
-```bash
-cd server
-npm run test:watch
-```
-
-The API tests cover request validation, persistence, listing, filtering, pagination, cancellation,
-progress-log retrieval, and error responses. Worker Threads and Socket.IO are mocked in this suite;
-the live worker lifecycle should be verified manually by running the application and observing a
-request move from `pending` to `processing` and then `completed` in two browser views.
+The current implementation includes Spring Boot test support for validation, persistence, and controller-level behavior.
 
 ---
 
-## Production Build
+## Notes
+
+- Role switching is handled in the client-state layer rather than by a formal authentication system.
+- Security is enabled through Spring Security but the current scope focuses on the operational workflow rather than production RBAC or JWT authentication.
+- The system is designed as a single-node service and does not currently include a distributed queue or multi-node WebSocket clustering.
 
 ### Build Backend
 ```bash
-cd server
-npm run build
-npm start
+cd service-request-server
+./mvnw clean package
 ```
 
 ### Build Frontend
 ```bash
 cd client
 npm run build
-npm run preview
 ```
 
 ---
 
 ## Troubleshooting
 
-1. **`MongoDB Connection Error`**:
-   - Ensure MongoDB is running on `mongodb://localhost:27017`.
-   - Update `MONGODB_URI` in `server/.env` if using a remote MongoDB Atlas cluster.
-2. **`Port Already in Use`**:
-   - Change `PORT` in `server/.env` and update the proxy port in `client/vite.config.ts`.
-3. **`Worker script not found in production`**:
-   - Running `npm run build` compiles `requestProcessor.worker.ts` to `dist/workers/requestProcessor.worker.js`.
+1. **PostgreSQL connection error**:
+   - Ensure PostgreSQL is running and the database `service_request_db` exists.
+   - Verify the datasource credentials in `service-request-server/src/main/resources/application.properties`.
+2. **Port already in use**:
+   - Change the backend port in `application.properties` if needed.
+   - Update any frontend configuration pointing to the backend URL.
+3. **WebSocket connection issues**:
+   - Confirm the backend is running on port 8080 and the endpoint is `/ws`.
 
 ---
 
 ## Assumptions
 
-- **Service Request Domain**: Requests represent compute-intensive operational workflows with 6 stages (*Validation, Allocation, Analysis, Processing, Quality Check, Finalization*).
-- **Authentication**: Role simulation is handled via client workspace toggling without backend JWT authentication.
-- **Single Server Node**: The system assumes a single Node.js instance; multi-server horizontal scaling would require Redis Pub/Sub.
+- **Service Request Domain**: Requests represent asynchronous operational workflows with a standard lifecycle.
+- **Authentication**: Role simulation is handled in the client without a full production auth layer.
+- **Single Node Deployment**: The current design assumes one application instance; distributed scaling would require additional queueing and clustering work.
 
 ---
 
 ## Future Improvements
 
-- **Authentication & RBAC**: JWT authentication with password hashing and role-based route guards.
-- **Distributed Queuing**: Redis-backed BullMQ queue for multi-node worker distribution.
-- **Webhook Subscriptions**: Configurable webhook alerts for external customer systems on request completion.
+- Authentication and RBAC with JWT or OAuth2.
+- Database migration tooling such as Flyway or Liquibase.
+- Production-grade deployment security including TLS and secrets management.
+- Distributed queueing for larger multi-instance workloads.

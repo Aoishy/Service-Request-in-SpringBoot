@@ -1,32 +1,45 @@
-# React + TypeScript + Vite
+# OpsDesk Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This is the frontend for the OpsDesk service request management system. It is built with React, TypeScript, and Vite and connects to the Spring Boot backend for request management and real-time WebSocket updates.
 
-Currently, two official plugins are available:
+## Purpose
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The client supports two operational roles:
 
-## React Compiler
+- Operator: create and track submitted requests
+- Supervisor: review pending, active, and completed requests; inspect progress logs; cancel work when needed
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Local Setup
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+cd client
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The app typically runs on:
+
+- http://localhost:5173
+
+## Backend Connection
+
+The frontend expects the backend API on:
+
+- http://localhost:8080
+
+The current system is wired to the Spring Boot REST API and the STOMP WebSocket endpoint at:
+
+- ws://localhost:8080/ws
+
+## Core UI Responsibilities
+
+- Request creation form
+- Filter and search controls
+- Pagination and sorting
+- Progress tracking and status badges
+- Request detail modal with audit trail
+- Real-time updates via live subscription events
+
+## Notes
+
+This frontend is designed to work alongside the Spring Boot + PostgreSQL backend in this workspace. It is not a standalone app and depends on the backend service being running for complete functionality.

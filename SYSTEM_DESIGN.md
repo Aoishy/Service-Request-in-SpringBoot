@@ -2,13 +2,13 @@
 
 ## 1. Architecture Overview
 
-The system is architected as a decoupled, multi-tier full-stack application composed of:
+The system is built as a multi-tier application composed of:
 
-1. **Frontend Presentation Tier**: A Single-Page Application (SPA) built with React 19, TypeScript, and Vite. It utilizes TanStack Query for server-state caching and synchronization, Zustand for local role management, and Socket.IO Client for bidirectional live event subscription.
-2. **Application & API Tier**: An Express.js server in TypeScript implementing a layered architecture (Routes → Controllers → Services → Repositories → Models). It manages HTTP REST communication, Zod input validation, rate limiting, and centralized error handling.
-3. **Real-Time Communication Tier**: A Socket.IO WebSocket server mounted directly on the HTTP server instance, broadcasting state mutations to connected clients and performing late-join hydration.
-4. **Background Concurrency Tier**: A dedicated `WorkerPool` managing true parallel execution via Node.js `worker_threads`. CPU-bound multi-stage tasks run in dedicated operating-system-level threads, isolating heavy computations from the Express event loop.
-5. **Persistence Tier**: MongoDB using Mongoose ODM with indexed collections for service requests and immutable append-only progress logs.
+1. Frontend presentation layer using React + TypeScript + Vite.
+2. Spring Boot backend with REST controllers, service logic, validation, and WebSocket messaging.
+3. PostgreSQL as the persistence layer.
+4. Java worker pool for asynchronous request processing.
+5. STOMP event distribution to connected clients.
 
 ---
 
@@ -16,207 +16,239 @@ The system is architected as a decoupled, multi-tier full-stack application comp
 
 ```mermaid
 flowchart TB
-    subgraph ClientLayer ["Client Presentation (Browser)"]
-        Operator["Operator Portal"]
-        Supervisor["Supervisor Console"]
-    end
+    Client["Browser Client\nReact App"]
+    Controller["ServiceRequestController\nREST API"]
+    Service["ServiceRequestService\nBusiness Logic"]
+    Repository["JPA Repository\nPostgreSQL Access"]
+    WorkerPool["WorkerPool\nExecutorService"]
+    Processor["RequestProcessor\nLifecycle Execution"]
+    DB[("PostgreSQL\nservice_request_db")]
+    Broker["STOMP Broker\n/topic"]
 
-    subgraph APILayer ["Express Backend & WebSocket Server"]
-        HTTPGateway["HTTP REST API Gateway\n(Express 4 + Zod)"]
-        SocketServer["Socket.IO Server\n(Event Broadcaster & Hydration)"]
-        ServiceLayer["Service & Repository Layer\n(Business Logic)"]
-    end
-
-    subgraph ConcurrencyLayer ["Concurrency & Worker Engine"]
-        PoolManager["WorkerPool Manager\n(FIFO Queue + Concurrency Limit)"]
-        subgraph WorkerThreads ["Node.js Worker Threads"]
-            W1["Worker Thread #1"]
-            W2["Worker Thread #2"]
-            Wn["Worker Thread #N"]
-        end
-    end
-
-    subgraph DatabaseLayer ["Data Persistence"]
-        MongoDB[(MongoDB Database)]
-        CollReq[("ServiceRequests Collection")]
-        CollLog[("ProgressLogs Collection")]
-    end
-
-    Operator -->|HTTP REST: POST /api/requests| HTTPGateway
-    Supervisor -->|HTTP REST: GET /api/requests| HTTPGateway
-    Supervisor -->|HTTP REST: POST /api/requests/:id/cancel| HTTPGateway
-
-    Operator <-->|WebSocket: Live Events| SocketServer
-    Supervisor <-->|WebSocket: Live Events| SocketServer
-
-    HTTPGateway --> ServiceLayer
-    ServiceLayer --> PoolManager
-    ServiceLayer --> MongoDB
-
-    PoolManager -->|Spawn Worker| W1
-    PoolManager -->|Spawn Worker| W2
-    PoolManager -->|Spawn Worker| Wn
-
-    W1 -.->|IPC: postMessage| PoolManager
-    W2 -.->|IPC: postMessage| PoolManager
-    Wn -.->|IPC: postMessage| PoolManager
-
-    PoolManager -->|Update DB & Progress Log| MongoDB
-    PoolManager -->|Broadcast Progress/Status| SocketServer
-
-    MongoDB --- CollReq
-    MongoDB --- CollLog
+    Client -->|HTTP| Controller
+    Client <-->|WebSocket| Broker
+    Controller --> Service
+    Service --> Repository
+    Service --> WorkerPool
+    WorkerPool --> Processor
+    Processor --> Repository
+    Repository --> DB
+    Processor --> Broker
 ```
 
 ---
 
-## 3. Component Diagram
+## 3. Component Design
 
 ```mermaid
 flowchart LR
-    subgraph FrontendComponents ["Frontend Component Architecture"]
-        Layout["Layout & Nav"]
-        LiveIndicator["LiveIndicator (WS)"]
-        OperatorPage["OperatorPage"]
-        SupervisorPage["SupervisorPage"]
-        RequestForm["RequestForm"]
-        RequestCard["RequestCard"]
-        FilterBar["FilterBar"]
-        RequestDetailModal["RequestDetailModal"]
-        useSocket["useSocket Hook"]
-        useRequestsQuery["useRequestsQuery (React Query)"]
-    end
+    Frontend["Frontend Components"]
+    API["REST API Layer"]
+    Validation["Jakarta Validation"]
+    ServiceLayer["Service Layer"]
+    RepositoryLayer["Repository Layer"]
+    EntityLayer["Entities / Enums"]
+    WorkerLogic["WorkerPool + RequestProcessor"]
+    Socket["WebSocketEventService"]
+    Postgres[("PostgreSQL")]
 
-    subgraph BackendComponents ["Backend Layered Architecture"]
-        Routes["Routes (serviceRequest.routes)"]
-        Validation["Zod Schema Validator Middleware"]
-        RateLimit["Rate Limiter Middleware"]
-        Controllers["Controllers (serviceRequest.controller)"]
-        Services["Services (serviceRequest.service)"]
-        Repositories["Repositories (serviceRequest / progressLog)"]
-        MongooseModels["Mongoose Models (ServiceRequest / ProgressLog)"]
-        ErrorHandler["Centralized ErrorHandler Middleware"]
-        SocketHandler["SocketHandler (initSocketServer / getIO)"]
-        WorkerPoolModule["WorkerPool Engine"]
-        WorkerScript["requestProcessor.worker"]
-    end
-
-    RequestForm -->|Submit Form| useRequestsQuery
-    useRequestsQuery -->|REST API Calls| Routes
-    useSocket <-->|WebSocket Events| SocketHandler
-
-    Routes --> RateLimit --> Validation --> Controllers
-    Controllers --> Services
-    Services --> Repositories --> MongooseModels
-    Services --> WorkerPoolModule
-    WorkerPoolModule --> WorkerScript
-    WorkerPoolModule --> Repositories
-    WorkerPoolModule --> SocketHandler
-    Controllers -.-> ErrorHandler
+    Frontend --> API
+    API --> Validation
+    Validation --> ServiceLayer
+    ServiceLayer --> RepositoryLayer
+    RepositoryLayer --> EntityLayer
+    ServiceLayer --> WorkerLogic
+    WorkerLogic --> Socket
+    RepositoryLayer --> Postgres
+    Socket --> Broker["STOMP /topic updates"]
 ```
 
 ---
 
 ## 4. Project Structure
 
-```
+```text
 AoishyTask/
-├── SYSTEM_ANALYSIS.md          # Business problem, requirements, scope, NFRs
-├── SYSTEM_DESIGN.md            # Architecture, schemas, API, WebSockets, Concurrency
-├── IMPLEMENTATION.md           # Implementation breakdown, lifecycle, testing
-├── README.md                   # Getting started, environment setup, API docs
-│
-├── server/                     # Backend Node.js / Express Application
-│   ├── .env.example            # Environment configuration template
-│   ├── package.json            # Server dependencies and scripts
-│   ├── tsconfig.json           # TypeScript configuration
-│   ├── vitest.config.ts        # Vitest test configuration
-│   └── src/
-│       ├── index.ts            # Entrypoint: DB connect, HTTP server, WorkerPool, Sockets
-│       ├── app.ts              # Express application setup & middleware registration
-│       ├── config/             # Typed environment configuration loader
-│       ├── db/                 # MongoDB Mongoose connection manager
-│       ├── models/             # Mongoose schemas: ServiceRequest, ProgressLog
-│       ├── repositories/       # Data-access abstraction layer
-│       ├── services/           # Core business logic & worker dispatching
-│       ├── controllers/        # Thin HTTP request/response handlers
-│       ├── routes/             # Express route declarations
-│       ├── validation/         # Zod schemas for request validation
-│       ├── middleware/         # Validation, rate limiting, error handling
-│       ├── socket/             # Socket.IO initialization and hydration logic
-│       ├── workers/            # WorkerPool class & requestProcessor.worker thread
-│       ├── types/              # Shared backend TypeScript interfaces
-│       └── __tests__/          # Vitest integration tests with MongoMemoryServer
-│
-└── client/                     # Frontend React SPA Application
-    ├── index.html              # HTML entrypoint with Inter font
-    ├── package.json            # Client dependencies and scripts
-    ├── vite.config.ts          # Vite configuration with /api & /socket.io proxy
-    ├── tailwind.config.ts      # Tailwind CSS configuration
-    └── src/
-        ├── main.tsx            # React DOM root render
-        ├── App.tsx             # QueryClientProvider & layout wrapper
-        ├── index.css           # Global Tailwind and scrollbar styling
-        ├── api/                # Axios client & TanStack Query hooks
-        ├── components/         # Reusable UI components (Form, Card, Table, Modal, Badges)
-        ├── hooks/              # useSocket WebSocket client hook
-        ├── pages/              # OperatorPage and SupervisorPage
-        ├── store/              # Zustand roleStore for role switching
-        ├── types/              # Frontend TypeScript types
-        └── utils/              # ClassName merging helpers (cn)
+├── README.md
+├── SYSTEM_ANALYSIS.md
+├── SYSTEM_DESIGN.md
+├── IMPLEMENTATION.md
+├── client/
+│   ├── package.json
+│   ├── src/
+│   └── README.md
+├── service-request-server/
+│   ├── pom.xml
+│   ├── mvnw
+│   ├── src/
+│   │   ├── main/java/com/aoishy/servicerequest/
+│   │   │   ├── config/
+│   │   │   ├── controller/
+│   │   │   ├── dto/
+│   │   │   ├── entity/
+│   │   │   ├── repository/
+│   │   │   ├── service/
+│   │   │   ├── websocket/
+│   │   │   └── worker/
+│   │   └── main/resources/application.properties
+│   └── test/
+└── task
 ```
 
 ---
 
 ## 5. Database Design
 
-The system utilizes MongoDB via Mongoose. The database design comprises two main collections:
+The persistence layer uses PostgreSQL with JPA entities.
 
-### 1. `ServiceRequest` Collection
-Stores metadata, status, progress percentage, current stage, and lifecycle timestamps for each service task.
+### ServiceRequest
 
-| Field | Type | Required | Constraints / Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `_id` | `ObjectId` | Auto | Primary Key | MongoDB Document identifier |
-| `title` | `String` | Yes | Min: 3, Max: 100, Trim | Brief title of the service request |
-| `description` | `String` | Yes | Min: 10, Max: 1000, Trim | Detailed operational instructions |
-| `priority` | `String` | Yes | Enum: `low`, `medium`, `high`, `critical` | Task urgency level |
-| `status` | `String` | Yes | Enum: `pending`, `processing`, `completed`, `failed`, `cancelled` (Default: `pending`) | Current lifecycle state |
-| `progress` | `Number` | Yes | Min: 0, Max: 100 (Default: 0) | Completion percentage |
-| `currentStage`| `String` | No | Trim | Name of the active processing phase |
-| `submittedBy` | `String` | Yes | Max: 50, Trim | Submitter / Operator name |
-| `startedAt` | `Date` | No | Optional timestamp | Time background processing began |
-| `completedAt` | `Date` | No | Optional timestamp | Time processing finished or terminated |
-| `errorMessage`| `String` | No | Trim | Reason for failure if status is `failed` |
-| `createdAt` | `Date` | Auto | Mongoose Timestamp | Record creation timestamp |
-| `updatedAt` | `Date` | Auto | Mongoose Timestamp | Record last update timestamp |
+| Field | Type | Notes |
+| --- | --- | --- |
+| id | Long | Primary key |
+| title | String | 3–100 chars |
+| description | String | 10–1000 chars |
+| priority | RequestPriority | Enum |
+| status | RequestStatus | Enum |
+| progress | Integer | 0–100 |
+| currentStage | String | Current lifecycle stage |
+| submittedBy | String | Submitter identifier |
+| startedAt | LocalDateTime | Start timestamp |
+| completedAt | LocalDateTime | Completion/cancel/failure time |
+| errorMessage | String | Failure detail |
+| createdAt | LocalDateTime | Creation time |
+| updatedAt | LocalDateTime | Last update |
 
-#### Indexes:
-- `status: 1`
-- `priority: 1`
-- `submittedBy: 1`
-- `createdAt: -1`
-- `status: 1, priority: 1` (Compound)
-- `title: 'text', description: 'text'` (Full-Text Search Index)
+Indexes include:
+- status
+- priority
+- submitted_by
+- created_at
+- status + priority
+
+### ProgressLog
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| id | Long | Primary key |
+| request | ServiceRequest | Many-to-one relation |
+| stage | String | Stage name |
+| message | String | Progress note |
+| progress | Integer | Progress percentage |
+| timestamp | LocalDateTime | Log timestamp |
+| createdAt | LocalDateTime | Insert timestamp |
+
+Indexes include:
+- request_id
+- timestamp
+
+```mermaid
+erDiagram
+    ServiceRequest ||--o{ ProgressLog : has
+    ServiceRequest {
+        Long id PK
+        String title
+        String description
+        RequestPriority priority
+        RequestStatus status
+        Integer progress
+        String currentStage
+        String submittedBy
+        LocalDateTime startedAt
+        LocalDateTime completedAt
+        String errorMessage
+        LocalDateTime createdAt
+        LocalDateTime updatedAt
+    }
+    ProgressLog {
+        Long id PK
+        Long requestId FK
+        String stage
+        String message
+        Integer progress
+        LocalDateTime timestamp
+        LocalDateTime createdAt
+    }
+```
 
 ---
 
-### 2. `ProgressLog` Collection
-Stores an immutable, append-only chronological log of checkpoints emitted during background processing.
+## 6. API Design
 
-| Field | Type | Required | Constraints / Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `_id` | `ObjectId` | Auto | Primary Key | Log entry identifier |
-| `requestId` | `ObjectId` | Yes | Reference: `ServiceRequest` | Foreign reference to parent request |
-| `stage` | `String` | Yes | Trim | Name of the completed checkpoint stage |
-| `message` | `String` | Yes | Trim | Diagnostic description of checkpoint |
-| `progress` | `Number` | Yes | Min: 0, Max: 100 | Progress percentage at checkpoint |
-| `timestamp` | `Date` | Yes | Default: `Date.now` | Checkpoint execution timestamp |
-| `createdAt` | `Date` | Auto | Mongoose Timestamp | Entry persistence timestamp |
+Base path: `/api/requests`
 
-#### Indexes:
-- `requestId: 1`
-- `timestamp: 1`
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/requests` | Create a request |
+| GET | `/api/requests` | List requests with filters |
+| GET | `/api/requests/{id}` | Get a request |
+| PATCH | `/api/requests/{id}/cancel` | Cancel a request |
+| GET | `/api/requests/{id}/progress` | Get logs |
+| DELETE | `/api/requests/{id}` | Delete a request |
+
+The controller returns structured payloads using a common response wrapper:
+
+```java
+public record ApiResponse(boolean success, Object data) {}
+```
+
+---
+
+## 7. WebSocket Design
+
+The system uses Spring WebSocket with STOMP.
+
+### Configuration
+- STOMP endpoint: `/ws`
+- Simple broker: `/topic`
+- Application prefix: `/app`
+
+### Broker Messages
+- `/topic/request-created`
+- `/topic/request-status-updated`
+- `/topic/request-progress-updated`
+- `/topic/request-completed`
+- `/topic/request-failed`
+- `/topic/request-cancelled`
+
+This gives connected clients immediate updates without polling.
+
+---
+
+## 8. Concurrency Design
+
+### WorkerPool
+The `WorkerPool` is modeled around a Java `ExecutorService` with a fixed thread pool size. It tracks active request tasks by ID and supports cancellation requests.
+
+### RequestProcessor
+The `RequestProcessor` executes staged work and updates the request state incrementally. Each stage modifies:
+
+- request status,
+- progress value,
+- current stage,
+- updatedAt,
+- progress log records,
+- outbound WebSocket notifications.
+
+### Lifecycle Sequence
+1. Request is created and saved to PostgreSQL.
+2. Service layer registers a job in the worker pool.
+3. Background thread begins processing.
+4. Each stage updates state and emits STOMP notifications.
+5. Completion, failure, or cancellation resolves the lifecycle.
+
+---
+
+## 9. Security and Operational Notes
+
+The backend currently includes Spring Security support and validation infrastructure; however, authentication and authorization are not yet fully hardened for production use. The design remains focused on request workflow correctness and real-time operational visibility.
+
+Recommended future hardening:
+- JWT-based authentication
+- RBAC authorization checks
+- environment-specific configuration secrets
+- database migration tooling with Flyway/Liquibase
+- HTTPS and deployment-level TLS
 
 ```mermaid
 erDiagram
@@ -266,138 +298,55 @@ Base URL: `/api/requests`
 
 ---
 
-### Endpoint Specifications
-
-#### 1. `POST /api/requests`
-- **Request Body (JSON)**:
-  ```json
-  {
-    "title": "Customer Data Migration",
-    "description": "Migrate customer database records with integrity checks.",
-    "priority": "high",
-    "submittedBy": "Alex Mercer"
-  }
-  ```
-- **Response `201 Created`**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "request": {
-        "_id": "66c888b1f81d4e0012345678",
-        "title": "Customer Data Migration",
-        "description": "Migrate customer database records with integrity checks.",
-        "priority": "high",
-        "status": "pending",
-        "progress": 0,
-        "submittedBy": "Alex Mercer",
-        "createdAt": "2026-08-24T10:00:00.000Z",
-        "updatedAt": "2026-08-24T10:00:00.000Z"
-      }
-    }
-  }
-  ```
-- **Error Codes**: `400 Validation Error`, `429 Too Many Requests`, `500 Server Error`.
-
-#### 2. `GET /api/requests`
-- **Query Parameters**:
-  - `page` (default: 1)
-  - `limit` (default: 10, max: 50)
-  - `status` (`pending` | `processing` | `completed` | `failed` | `cancelled`)
-  - `priority` (`low` | `medium` | `high` | `critical`)
-  - `submittedBy` (string search)
-  - `search` (full-text search across title & description)
-  - `sortBy` (`createdAt` | `updatedAt` | `priority` | `status`)
-  - `sortOrder` (`asc` | `desc`, default: `desc`)
-- **Response `200 OK`**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "requests": [ /* array of requests */ ],
-      "pagination": {
-        "total": 45,
-        "page": 1,
-        "limit": 10,
-        "totalPages": 5
-      }
-    }
-  }
-  ```
-
-#### 3. `POST /api/requests/:id/cancel`
-- **Path Parameter**: `id` (24-character hex MongoDB ObjectId)
-- **Response `200 OK`**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "request": {
-        "_id": "66c888b1f81d4e0012345678",
-        "status": "cancelled",
-        "completedAt": "2026-08-24T10:02:15.000Z"
-      }
-    }
-  }
-  ```
-- **Error Codes**: `404 Not Found`, `422 Invalid State` (if request is already completed/failed).
-
----
-
 ## 7. WebSocket Communication
 
-Socket.IO is configured with CORS origin matching `CORS_ORIGIN`.
+The system uses Spring WebSocket with STOMP for real-time communication.
+
+### Broker Setup
+- Endpoint: `/ws`
+- Client subscription prefix: `/topic`
+- Client send prefix: `/app`
 
 ### Event Catalog
 
-| Event Name | Direction | Trigger Condition | Payload Structure |
-| :--- | :--- | :--- | :--- |
-| `requests:initial-state` | Server → Client | Emitted to a newly connected socket | `{ requests: IServiceRequest[] }` |
-| `request:created` | Server → Broadcast | Operator creates request via API | `{ request: IServiceRequest }` |
-| `request:status-updated` | Server → Broadcast | Request changes status to `processing` | `{ requestId, status, currentStage, startedAt, updatedAt }` |
-| `request:progress-updated` | Server → Broadcast | Worker finishes a processing stage | `{ requestId, progress, currentStage, message, timestamp }` |
-| `request:completed` | Server → Broadcast | Worker finishes final stage (100%) | `{ requestId, status: 'completed', progress: 100, completedAt }` |
-| `request:failed` | Server → Broadcast | Worker encounters uncaught error | `{ requestId, status: 'failed', errorMessage, completedAt }` |
-| `request:cancelled` | Server → Broadcast | User requests cancellation | `{ requestId, status: 'cancelled', completedAt }` |
+| Event Topic | Direction | Purpose |
+| --- | --- | --- |
+| `/topic/request-created` | Server → Client | New request created |
+| `/topic/request-status-updated` | Server → Client | Lifecycle status changed |
+| `/topic/request-progress-updated` | Server → Client | Progress stage and percentage update |
+| `/topic/request-completed` | Server → Client | Request reached 100% completion |
+| `/topic/request-failed` | Server → Client | Request failed with error details |
+| `/topic/request-cancelled` | Server → Client | Request cancelled |
 
 ### Real-Time Event Sequence
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Operator as Operator (Browser)
-    participant API as Express API Server
-    participant Pool as WorkerPool Manager
-    participant Worker as Worker Thread
-    participant Socket as Socket.IO Server
-    actor Supervisor as Supervisor (Browser)
-
-    Supervisor->>Socket: Connect WebSocket
-    Socket-->>Supervisor: emit "requests:initial-state" (Active Requests)
+    actor Operator as Operator
+    participant API as Spring REST API
+    participant Service as ServiceRequestService
+    participant Pool as WorkerPool
+    participant Worker as RequestProcessor
+    participant Broker as STOMP Broker
+    actor Supervisor as Supervisor
 
     Operator->>API: POST /api/requests
-    API->>Pool: enqueue({ requestId, workerData })
-    API->>Socket: emit "request:created"
-    Socket-->>Supervisor: "request:created" (Added to Table/Grid)
-    API-->>Operator: 201 Created (Instant Response)
+    API->>Service: createRequest(...)
+    Service->>Service: Save entity to PostgreSQL
+    Service->>Broker: /topic/request-created
+    Broker-->>Supervisor: Live new request update
+    Service->>Pool: submit(requestId, task)
+    Pool->>Worker: process(requestId)
 
-    Pool->>Worker: Spawn new Worker (Worker Thread)
-    Worker->>Pool: postMessage({ type: 'STARTED' })
-    Pool->>Socket: emit "request:status-updated" (processing)
-    Socket-->>Supervisor: Status Badge -> "Processing"
-    Socket-->>Operator: Status Badge -> "Processing"
-
-    loop Processing Stages (Validation -> Analysis -> Processing -> QC)
-        Worker->>Pool: postMessage({ type: 'PROGRESS', stage, progress, message })
-        Pool->>Socket: emit "request:progress-updated"
-        Socket-->>Supervisor: Live Progress Bar Updates
-        Socket-->>Operator: Live Progress Bar Updates
+    Worker->>Worker: Update status to PROCESSING
+    Worker->>Broker: /topic/request-status-updated
+    loop Stage processing
+        Worker->>Service: Save progress log
+        Worker->>Broker: /topic/request-progress-updated
     end
 
-    Worker->>Pool: postMessage({ type: 'COMPLETED', progress: 100 })
-    Pool->>Socket: emit "request:completed"
-    Socket-->>Supervisor: Status Badge -> "Completed" (100%)
-    Socket-->>Operator: Status Badge -> "Completed" (100%)
+    Worker->>Broker: /topic/request-completed or /topic/request-failed or /topic/request-cancelled
 ```
 
 ---
@@ -406,116 +355,91 @@ sequenceDiagram
 
 ### WorkerPool Architecture
 
-The background execution engine utilizes Node.js **Worker Threads (`worker_threads`)**, not simple asynchronous timers.
+The backend uses a Java `ExecutorService` with a bounded thread pool and tracks active request tasks by ID.
 
 ```mermaid
 flowchart TB
-    subgraph MainThread ["Main Thread (Event Loop)"]
-        Ingest["Incoming Request"] --> Enqueue["enqueue()"]
-        Enqueue --> Queue[("FIFO Job Queue\n[Job 1, Job 2, ...]")]
-        Queue --> Dispatcher{"Slots Available?\n(activeCount < MAX_WORKERS)"}
-        Dispatcher -->|Yes| SpawnWorker["Spawn new Worker()"]
-        Dispatcher -->|No| WaitQueue["Wait in Queue"]
-    end
-
-    subgraph WorkerPoolSlots ["Active Worker Slots (Max: MAX_WORKERS)"]
-        SpawnWorker --> WSlot1["Worker #1\n(requestProcessor.worker)"]
-        SpawnWorker --> WSlot2["Worker #2\n(requestProcessor.worker)"]
-        SpawnWorker --> WSlot3["Worker #3\n(requestProcessor.worker)"]
-    end
-
-    subgraph WorkerExecution ["Worker Thread Internal"]
-        WSlot1 --> ChunkLoop["Chunked Execution (100ms chunks)\n+ Prime Sieve CPU Work"]
-        ChunkLoop --> CheckCancel{"Cancel Signal\nReceived?"}
-        CheckCancel -->|No| StagePass["Stage Checkpoint Emit"]
-        CheckCancel -->|Yes| Terminate["Emit CANCELLED & Exit"]
-    end
-
-    StagePass -.->|postMessage| Ingest
-    WSlot1 -.->|Worker exit (code 0)| FreeSlot["Slot Freed -> Next in Queue"]
-    FreeSlot --> Dispatcher
+    Request["Incoming Request"] --> Save["Persist to PostgreSQL"]
+    Save --> Submit["WorkerPool.submit()"]
+    Submit --> Pool["Fixed Thread Pool"]
+    Pool --> Processor["RequestProcessor"]
+    Processor --> Stage["Validation → Analysis → Processing → Finalization"]
+    Stage --> Log["ProgressLog persistence"]
+    Log --> WS["STOMP topic broadcast"]
 ```
 
 ### Key Concurrency Mechanics
-1. **Thread Bounding**: Regulated by `MAX_WORKERS` (default: 5) to prevent thread exhaustion under load.
-2. **Main Thread Isolation**: No MongoDB connections or database queries exist inside worker threads; workers communicate strictly via `parentPort.postMessage()` IPC, leaving main thread to persist logs.
-3. **Cooperative Cancellation**: Main thread sends `{ type: 'CANCEL' }` via IPC. Worker yields every 100ms (`setImmediate`) to inspect flags and abort safely.
-4. **Queue Draining**: On worker exit (`worker.on('exit')`), the pool automatically pops and starts the next job in the FIFO queue.
+1. The API thread remains responsive while processing continues in the background.
+2. A fixed-size thread pool prevents excessive concurrent work.
+3. Cancellation is handled by interrupting the active worker thread.
+4. The main application writes persistence and emits notifications after each state transition.
 
 ---
 
 ## 9. Technology Stack Justification
 
 | Technology | Selection | Justification |
-| :--- | :--- | :--- |
-| **Frontend Framework** | React 19 + TypeScript + Vite | Component-based state model, instantaneous HMR dev build, type-safety across props and payloads. |
-| **Server State Manager** | TanStack React Query v5 | Automatic background query refetching, cache invalidation, and query cache direct mutation on socket events. |
-| **Real-Time Transport** | Socket.IO v4 | Robust WebSocket protocol with automatic fallback, reconnection backoff, and event-driven broadcasting. |
-| **Backend Runtime** | Node.js + Express 4 + TypeScript | Non-blocking I/O ideal for API gateways and WebSocket servers; strict compile-time validation. |
-| **Concurrency Engine** | Node.js `worker_threads` | True OS-level multi-threading in Node.js, ensuring CPU-bound operations do not block the event loop. |
-| **Database & ODM** | MongoDB + Mongoose 8 | Flexible document schema well-suited for nested stage progress logs and high-write concurrency. |
-| **Schema Validation** | Zod | Declarative, TypeScript-inferred input validation for query parameters and request bodies. |
-| **Testing** | Vitest + Supertest + MongoMemoryServer | Lightning-fast test execution with fully isolated in-memory database instances. |
+| --- | --- | --- |
+| Frontend | React + TypeScript + Vite | Quick UI iteration and strong typing |
+| Backend | Spring Boot + Java 21 | Structured enterprise backend with MVC, JPA, WebSocket support |
+| Real-time transport | STOMP over WebSocket | Clean pub/sub updates for connected dashboards |
+| Database | PostgreSQL | Reliable relational storage and strong transactional integrity |
+| Concurrency | Java ExecutorService | Simple bounded background task execution |
+| Validation | Jakarta Validation | Clear server-side constraints for DTOs and entities |
 
 ---
 
 ## 10. Error Handling Architecture
 
-The backend implements a centralized error handling strategy:
+The backend uses a layered approach to failure handling:
 
-1. **Custom AppError Hierarchy**:
-   - `NotFoundError` (404)
-   - `ValidationError` (400)
-   - `InvalidStateError` (422)
-   - `RateLimitError` (429)
-2. **Global Error Middleware**: Traps thrown errors, formats uniform `{ success: false, error: { code, message, details } }` responses, and logs stack traces in development.
-3. **Worker Crash Isolation**: Worker errors (`worker.on('error')`) trigger `handleWorkerCrash()` which marks the request as `failed` in MongoDB and broadcasts `request:failed` to clients, preventing server instability.
+1. request validation rejects invalid payloads early,
+2. service-level exceptions are surfaced to the controller layer,
+3. processing failures are converted into failed request states,
+4. notifications are emitted to connected clients for operational awareness.
 
 ---
 
 ## 11. Configuration Management
 
-Environment variables are loaded via `dotenv` and validated via a typed singleton ([config/index.ts](file:///e:/AoishyTask/server/src/config/index.ts)):
+The main backend configuration is kept in `service-request-server/src/main/resources/application.properties`.
 
-```typescript
-export const config = {
-  env: getEnv('NODE_ENV', 'development'),
-  port: getEnvInt('PORT', 5000),
-  mongodbUri: getEnv('MONGODB_URI', 'mongodb://localhost:27017/service-requests'),
-  corsOrigin: getEnv('CORS_ORIGIN', 'http://localhost:5173'),
-  maxWorkers: getEnvInt('MAX_WORKERS', 5),
-  rateLimit: {
-    windowMs: getEnvInt('RATE_LIMIT_WINDOW_MS', 60_000),
-    maxRequests: getEnvInt('RATE_LIMIT_MAX_REQUESTS', 20),
-  },
-};
+```properties
+spring.application.name=service-request-server
+
+spring.datasource.url=jdbc:postgresql://localhost:5432/service_request_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres123
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+server.port=8080
 ```
 
 ---
 
 ## 12. Security Considerations
 
-### Implemented Security Measures
-- **CORS Configuration**: Restricts WebSocket and HTTP origins to authorized client origin (`config.corsOrigin`).
-- **Rate Limiting**: `express-rate-limit` enforces rate bounds on submission routes (`POST /api/requests`).
-- **Input Sanitization & Validation**: Zod middleware strips extra fields and validates data lengths and enums.
-- **Error Obfuscation**: Production errors hide internal stack traces from clients.
+### Current state
+- Spring Security is included in the backend dependencies.
+- Request validation and database constraints are enforced at the server layer.
+- Client-side role switching is used for workflow separation, not production identity management.
 
-### Recommended Future Security Enhancements
-- User authentication via JSON Web Tokens (JWT) or OAuth2 session cookies.
-- Role-Based Access Control (RBAC) middleware verifying Supervisor vs Operator privileges.
-- Production HTTPS/TLS termination and Secure WebSocket (`wss://`) transport.
+### Recommended future improvements
+- JWT or OAuth2 authentication.
+- RBAC authorization checks by role.
+- HTTPS/TLS for production deployment.
+- Secrets management and environment-specific configuration.
 
 ---
 
 ## 13. Design Decisions and Trade-offs
 
-1. **Worker Threads vs. External Task Broker (Redis/BullMQ)**:
-   - *Decision*: Implemented embedded Node.js `worker_threads` with in-process FIFO queue.
-   - *Trade-off*: Eliminates heavy external infrastructure dependencies (Redis) for self-contained execution, though limited to single-node scaling.
-2. **Single Main Thread DB Access**:
-   - *Decision*: Worker threads pass IPC messages; only main thread writes to MongoDB.
-   - *Trade-off*: Avoids managing redundant database connection pools across dozens of ephemeral worker threads.
-3. **Client-Side Cache Direct Patching**:
-   - *Decision*: `useSocket` updates TanStack Query cache directly on status/progress events instead of triggering complete refetches.
-   - *Trade-off*: Maximizes UI responsiveness and minimizes unnecessary database read queries during rapid progress increments.
+1. Spring Boot + JPA over a custom Node backend:
+   - Chooses a strong Java ecosystem and clear enterprise layering for a structured service workflow.
+2. ExecutorService worker pool over external queue systems:
+   - Keeps the implementation self-contained and easy to run locally without Redis or RabbitMQ.
+3. Relational persistence in PostgreSQL:
+   - Better suits transactional request state than a document-only storage model for structured lifecycle history.
